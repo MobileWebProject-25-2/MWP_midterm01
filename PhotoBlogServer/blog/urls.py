@@ -6,5 +6,6 @@ router = routers.DefaultRouter()
 router.register('Post', views.BlogImages)
 
 urlpatterns = [
+    path('', views.post_list, name='post_list'),
     path('api_root/', include(router.urls)),
 ]
