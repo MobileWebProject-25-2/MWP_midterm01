@@ -2,9 +2,11 @@ package com.example.imageviewdemo;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -13,6 +15,8 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
@@ -49,14 +53,25 @@ public class MainActivity extends AppCompatActivity {
     private static final int PICK_IMAGE_REQUEST = 100;
     private Uri selectedImageUri;
     private AlertDialog uploadDialog;
+    
+    private PostAdapter postAdapter;
+    private boolean isAscending = false;
+    private boolean isDarkMode = false;
+    private SharedPreferences sharedPreferences;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 다크모드 설정 복원
+        sharedPreferences = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        isDarkMode = sharedPreferences.getBoolean("isDarkMode", false);
+        applyTheme();
+
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
+        // 동기화 버튼
         binding.btnLoad.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -64,12 +79,90 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // 새 이미지 게시 버튼
         binding.btnSave.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 onClickUpload();
             }
         });
+
+        // 정렬 버튼
+        binding.btnSort.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleSort();
+            }
+        });
+
+        // 다크모드 버튼
+        binding.btnDarkMode.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleDarkMode();
+            }
+        });
+
+        // 검색 기능
+        binding.searchEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (postAdapter != null) {
+                    postAdapter.filter(s.toString());
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+
+        updateDarkModeButtonText();
+    }
+
+    private void applyTheme() {
+        if (isDarkMode) {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
+        } else {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+        }
+    }
+
+    private void toggleDarkMode() {
+        isDarkMode = !isDarkMode;
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+        editor.putBoolean("isDarkMode", isDarkMode);
+        editor.apply();
+        
+        applyTheme();
+        updateDarkModeButtonText();
+    }
+
+    private void updateDarkModeButtonText() {
+        if (isDarkMode) {
+            binding.btnDarkMode.setText("라이트모드");
+        } else {
+            binding.btnDarkMode.setText("다크모드");
+        }
+    }
+
+    private void toggleSort() {
+        if (postAdapter != null) {
+            isAscending = !isAscending;
+            if (isAscending) {
+                postAdapter.sortByDateAscending();
+                binding.btnSort.setText("오래된순");
+                Toast.makeText(this, "오래된순으로 정렬", Toast.LENGTH_SHORT).show();
+            } else {
+                postAdapter.sortByDateDescending();
+                binding.btnSort.setText("최신순");
+                Toast.makeText(this, "최신순으로 정렬", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void onClickDownload() {
@@ -172,11 +265,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private class CloadImage extends AsyncTask<String, Integer, List<Bitmap>> {
+    private class CloadImage extends AsyncTask<String, Integer, List<Post>> {
 
         @Override
-        protected List<Bitmap> doInBackground(String... urls) {
-            List<Bitmap> bitmapList = new ArrayList<>();
+        protected List<Post> doInBackground(String... urls) {
+            List<Post> postList = new ArrayList<>();
 
             try {
                 String apiUrl = urls[0];
@@ -205,18 +298,30 @@ public class MainActivity extends AppCompatActivity {
 
                     for (int i = 0; i < aryJson.length(); i++) {
                         JSONObject post_json = aryJson.getJSONObject(i);
-                        String imageUrl = post_json.getString("image");
+                        
+                        int id = post_json.optInt("id", i);
+                        String title = post_json.optString("title", "제목 없음");
+                        String text = post_json.optString("text", "");
+                        String imageUrl = post_json.optString("image", "");
+                        String createdDate = post_json.optString("published_date", 
+                                            post_json.optString("created_date", ""));
 
-                        if (!imageUrl.equals("") && !imageUrl.equals("null")) {
-                            URL myImageUrl = new URL(imageUrl);
-                            HttpURLConnection imgConn = (HttpURLConnection) myImageUrl.openConnection();
-                            InputStream imgStream = imgConn.getInputStream();
-                            Bitmap imageBitmap = BitmapFactory.decodeStream(imgStream);
-
-                            if (imageBitmap != null) {
-                                bitmapList.add(imageBitmap);
+                        Bitmap imageBitmap = null;
+                        if (!imageUrl.isEmpty() && !imageUrl.equals("null")) {
+                            try {
+                                URL myImageUrl = new URL(imageUrl);
+                                HttpURLConnection imgConn = (HttpURLConnection) myImageUrl.openConnection();
+                                InputStream imgStream = imgConn.getInputStream();
+                                imageBitmap = BitmapFactory.decodeStream(imgStream);
+                                imgStream.close();
+                            } catch (Exception e) {
+                                e.printStackTrace();
                             }
-                            imgStream.close();
+                        }
+
+                        if (imageBitmap != null) {
+                            Post post = new Post(id, title, text, imageUrl, imageBitmap, createdDate);
+                            postList.add(post);
                         }
                     }
                 }
@@ -225,21 +330,52 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
 
-            return bitmapList;
+            return postList;
         }
 
         @Override
-        protected void onPostExecute(List<Bitmap> images) {
-            if (images == null || images.isEmpty()) {
+        protected void onPostExecute(List<Post> posts) {
+            if (posts == null || posts.isEmpty()) {
                 binding.textView.setText("불러올 이미지가 없습니다.\n서버와 토큰을 확인하세요.");
             } else {
-                binding.textView.setText("이미지 로드 성공! (" + images.size() + "개)");
+                binding.textView.setText("이미지 로드 성공! (" + posts.size() + "개)");
 
-                ImageAdapter adapter = new ImageAdapter(images);
+                postAdapter = new PostAdapter(posts);
                 binding.recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
-                binding.recyclerView.setAdapter(adapter);
+                binding.recyclerView.setAdapter(postAdapter);
+
+                // 아이템 클릭 리스너 (이미지 확대 보기)
+                postAdapter.setOnItemClickListener(new PostAdapter.OnItemClickListener() {
+                    @Override
+                    public void onItemClick(Post post) {
+                        Intent intent = new Intent(MainActivity.this, ImageDetailActivity.class);
+                        intent.putExtra("title", post.getTitle());
+                        intent.putExtra("text", post.getText());
+                        intent.putExtra("imageUrl", post.getImageUrl());
+                        startActivity(intent);
+                    }
+                });
+
+                // 삭제 버튼 리스너
+                postAdapter.setOnDeleteClickListener(new PostAdapter.OnDeleteClickListener() {
+                    @Override
+                    public void onDeleteClick(Post post, int position) {
+                        showDeleteConfirmDialog(post, position);
+                    }
+                });
             }
         }
+    }
+
+    private void showDeleteConfirmDialog(Post post, int position) {
+        new AlertDialog.Builder(this)
+                .setTitle("게시물 삭제")
+                .setMessage("\"" + post.getTitle() + "\"을(를) 삭제하시겠습니까?")
+                .setPositiveButton("삭제", (dialog, which) -> {
+                    new DeletePostTask(post, position).execute();
+                })
+                .setNegativeButton("취소", null)
+                .show();
     }
 
     private class UploadPost extends AsyncTask<String, Void, String> {
@@ -367,6 +503,58 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return result;
+    }
+
+    private class DeletePostTask extends AsyncTask<Void, Void, Boolean> {
+        private Post post;
+        private int position;
+
+        public DeletePostTask(Post post, int position) {
+            this.post = post;
+            this.position = position;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            binding.textView.setText("삭제 중...");
+        }
+
+        @Override
+        protected Boolean doInBackground(Void... voids) {
+            try {
+                String deleteUrl = site_url + "/api_root/Post/" + post.getId() + "/";
+                URL url = new URL(deleteUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("DELETE");
+                conn.setRequestProperty("Authorization", "Token " + token);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+
+                int responseCode = conn.getResponseCode();
+                conn.disconnect();
+
+                return responseCode == HttpURLConnection.HTTP_NO_CONTENT || 
+                       responseCode == HttpURLConnection.HTTP_OK;
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(Boolean success) {
+            if (success) {
+                Toast.makeText(MainActivity.this, "삭제되었습니다.", Toast.LENGTH_SHORT).show();
+                if (postAdapter != null) {
+                    postAdapter.removeItem(position);
+                }
+                binding.textView.setText("게시물이 삭제되었습니다.");
+            } else {
+                Toast.makeText(MainActivity.this, "삭제 실패", Toast.LENGTH_SHORT).show();
+                binding.textView.setText("삭제 실패");
+            }
+        }
     }
 
     @Override
