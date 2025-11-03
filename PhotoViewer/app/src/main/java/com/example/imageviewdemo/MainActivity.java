@@ -46,7 +46,12 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
-    private String site_url = "http://10.0.2.2:8000";
+
+    // 로컬 사이트
+    // private String site_url = "http://10.0.2.2:8000";
+
+    // 파이썬 애니웨어 사이트
+    private String site_url = "https://ksw090711.pythonanywhere.com";
     private String token = "e3acd79499b1bdc8d155861abed9728849a5556f";
     private CloadImage taskDownload;
 
